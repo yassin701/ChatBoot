@@ -7,6 +7,12 @@ import FloatingInput from '../components/FloatingInput';
 export default function Home() {
   const [messages, setMessages] = useState([]);
   const messagesEndRef = useRef(null);
+  const sessionIdRef = useRef(null);
+
+  useEffect(() => {
+    // Generate a unique session ID once per page load to persist memory in n8n
+    sessionIdRef.current = Math.random().toString(36).substring(2, 15);
+  }, []);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -16,18 +22,37 @@ export default function Home() {
     scrollToBottom();
   }, [messages]);
 
-  const handleSendMessage = (text) => {
-    // Optimistic user message append
-    const newMessages = [...messages, { role: 'user', content: text }];
-    setMessages(newMessages);
+  const handleSendMessage = async (text) => {
+    // Optimistic user message append and UI loading indicator
+    setMessages((prev) => [...prev, { role: 'user', content: text }]);
+    setMessages((prev) => [...prev, { role: 'ai', content: "Searching network...", isLoading: true }]);
 
-    // Simulate AI response delay
-    setTimeout(() => {
-      setMessages((prev) => [...prev, { 
-        role: 'ai', 
-        content: "I am a simple UI prototype. You just said: \"" + text + "\"" 
-      }]);
-    }, 800);
+    try {
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          query: text, 
+          sessionId: sessionIdRef.current 
+        })
+      });
+      
+      const data = await response.json();
+      
+      setMessages((prev) => {
+        // Strip out the loading message and add the real backend response
+        const withoutLoading = prev.filter(msg => !msg.isLoading);
+        return [...withoutLoading, { 
+          role: 'ai', 
+          content: response.ok ? data.output : (data.error || "The proxy returned an error.") 
+        }];
+      });
+    } catch (error) {
+      setMessages((prev) => {
+        const withoutLoading = prev.filter(msg => !msg.isLoading);
+        return [...withoutLoading, { role: 'ai', content: "A critical network failure occurred." }];
+      });
+    }
   };
 
   return (
